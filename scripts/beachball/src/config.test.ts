@@ -28,6 +28,8 @@ describe(`beachball configs`, () => {
 
   it(`should generate shared config`, () => {
     expect(sharedConfig).toEqual({
+      access: 'public',
+      branch: 'origin/master',
       changehint: "Run 'yarn change' to generate a change file",
       disallowedChangeTypes: ['major'],
       generateChangelog: true,
@@ -135,7 +137,7 @@ describe(`beachball configs`, () => {
     expect(vNextConfig.changelog.groups).toEqual([
       {
         changelogPath: 'packages/react-components/react-components',
-        masterPackageName: '@fluentui/react-components',
+        mainPackageName: '@fluentui/react-components',
         include: includeScopes,
       },
     ]);

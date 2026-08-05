@@ -1,17 +1,16 @@
 import { execSync } from 'child_process';
-import * as fs from 'fs';
-import * as path from 'path';
 
 import type { BeachballConfig } from 'beachball';
 
 import { renderEntry, renderHeader } from './customRenderers';
+import * as baseConfig from './base.config';
 
-const baseConfig: typeof import('../base.config.json') = JSON.parse(
-  fs.readFileSync(path.resolve(__dirname, '../base.config.json'), { encoding: 'utf8' }),
-);
-
-export const config: typeof baseConfig & Required<Pick<BeachballConfig, 'changelog' | 'hooks'>> = {
+/**
+ * Shared Beachball release config.
+ */
+export const config: typeof baseConfig & Required<Pick<BeachballConfig, 'branch' | 'changelog' | 'hooks'>> = {
   ...baseConfig,
+  branch: 'origin/master',
   changelog: {
     customRenderers: {
       renderHeader,
@@ -30,12 +29,10 @@ export const config: typeof baseConfig & Required<Pick<BeachballConfig, 'changel
 
         generators.forEach(generator => {
           const cmd = `yarn nx g @fluentui/workspace-plugin:${generator}`;
-          const out = execSync(cmd);
-          console.log(out.toString());
+          execSync(cmd, { stdio: 'inherit' });
         });
 
-        const out = execSync('yarn install --mode=update-lockfile');
-        console.log(out.toString());
+        execSync('yarn install --mode=update-lockfile', { stdio: 'inherit' });
       } catch (err) {
         console.error(err);
       }
