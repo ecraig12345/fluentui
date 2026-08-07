@@ -15,18 +15,6 @@ name: beachball-change-file
 
 Beachball normally uses a CLI with an interactive prompt to create change files, but they can also be created manually using the standardized JSON format detailed below.
 
-## Prerequisites
-
-- Determine the root directory: this is almost always the git root, but the user might specify a different folder. (The root usually contains `beachball.config.*` or `.beachballrc.*` or has a `"beachball"` key in `package.json`.)
-- Determine the package manager for the repo (`npm`, `yarn`, `pnpm`). The example commands below assume `yarn`, but substitute the appropriate command runner syntax for a different package manager.
-- Check the root `package.json` `scripts` for scripts that run `beachball change` and `beachball check`.
-  - The examples below assume `scripts` called `change` and `checkchange` respectively, but substitute the appropriate script names if found.
-  - Using `scripts` if defined is preferred since they may add extra arguments, but it's possible to run the commands directly: `yarn beachball change` and `yarn beachball check` (substituting appropriate command runner)
-- Use `beachball config get` to check the following settings (note: `beachball config get` only exists in versions `>= 2.64.0`)
-  - `yarn beachball config get changeDir`: where to put the change files
-  - `yarn beachball config get branch`: target branch name
-  - `yarn beachball config get groupChanges`: whether grouped change files are enabled (true/false/undefined)
-
 ## Creating and validating a change file
 
 Usually, an AI agent should create a change file manually following the standardized format detailed below.
@@ -40,7 +28,7 @@ Beachball only considers staged and committed files, so you should check for uns
 
 ### 2. Get changed packages
 
-Run `yarn checkchange --verbose` to get the list of changed packages and files considered by `beachball`:
+Run `yarn check:change --verbose` to get the list of changed packages and files considered by `beachball`:
 
 - The list of changed packages is under "Found changes in the following packages" -- you must ONLY include these packages in the change file! (beachball has various settings to ignore packages or files)
 - The list of changed files is under "changed files in current branch". IGNORE any files with `~~` strikethrough formatting.
@@ -49,7 +37,7 @@ DO NOT manually check for existing change files.
 
 ### 3. Create the change file(s)
 
-Change files are located under `<changeDir>`. There are two possible structures for change files, determined by the `groupChanges` setting.
+Change files are located under the root `change/` directory. This repo uses non-grouped change files.
 
 When checking diffs to generate change files, DO NOT merge with the target branch; just use the local merge-base.
 
@@ -60,7 +48,7 @@ If `groupChanges` is `false` or unset, you should create a separate change file 
 For each changed package **as listed by beachball**:
 
 1. Generate a random GUID: `node -e "console.log(crypto.randomUUID())"`
-2. Create a change file under `<changeDir>/<packageName>-<guid>.json` with the following format. See [Change entry values](#change-entry-values) below for the proper values of each field.
+2. Create a change file under `change/<packageName>-<guid>.json` with the following format. See [Change entry values](#change-entry-values) below for the proper values of each field.
 
 ```json
 {
@@ -72,30 +60,9 @@ For each changed package **as listed by beachball**:
 }
 ```
 
-#### Case 2: Grouped format (`groupChanges: true`)
-
-If `groupChanges` is `true`, you should create a single change file.
-
-1. Generate a random GUID: `node -e "console.log(crypto.randomUUID())"`
-2. Create a single change file under `<changeDir>/change-<guid>.json` with the following format. The `changes` array should have an entry for each changed package **as listed by beachball**. See [Change entry values](#change-entry-values) below for the proper values of each field.
-
-```json
-{
-  "changes": [
-    {
-      "packageName": "",
-      "type": "",
-      "dependentChangeType": "",
-      "comment": "",
-      "email": ""
-    }
-  ]
-}
-```
-
 ### 4. Validate the change file(s)
 
-Run `git add <changeDir>`, then re-run `yarn checkchange` to verify.
+Run `git add <changeDir>`, then re-run `yarn check:change` to verify.
 
 ## Change entry values
 
