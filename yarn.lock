@@ -2832,6 +2832,7 @@ __metadata:
     "@microsoft/api-extractor": "npm:7.51.0"
     "@microsoft/api-extractor-model": "npm:7.31.2"
     "@microsoft/eslint-plugin-sdl": "npm:1.0.1"
+    "@microsoft/esrp-npm-release": "npm:^0.1.1"
     "@microsoft/fast-build": "npm:0.9.0"
     "@microsoft/fast-element": "npm:3.0.0"
     "@microsoft/fast-test-harness": "npm:0.4.0"
@@ -2932,7 +2933,7 @@ __metadata:
     babel-plugin-module-resolver: "npm:5.0.3"
     babel-plugin-react-compiler: "npm:1.0.0"
     babel-plugin-tester: "npm:10.1.0"
-    beachball: "npm:3.0.0-alpha.7"
+    beachball: "npm:3.0.0-alpha.8"
     chalk: "npm:4.1.0"
     chrome-remote-interface: "npm:0.28.2"
     ci-info: "npm:3.9.0"
@@ -7653,6 +7654,15 @@ __metadata:
   peerDependencies:
     eslint: ^9
   checksum: 10c0/2b4ea413380007abc14317163fe7224730ee067559bdd1d3b1428a56ba4eb4fb3fd5f21bd6c41f2572ec65a996ddeff6d690fdfa2cb436a8a70cd42af6b3efe6
+  languageName: node
+  linkType: hard
+
+"@microsoft/esrp-npm-release@npm:^0.1.1":
+  version: 0.1.1
+  resolution: "@microsoft/esrp-npm-release@npm:0.1.1"
+  bin:
+    esrp-npm-release: bin/esrp-npm-release.js
+  checksum: 10c0/3800aa43b84e787325e7752207065887b20adabb7fbfa8a5443ea902bde57551d34742fa045b4627f91353e2ad29ba032c02beb4080a4d77554f1aaa61ebddb7
   languageName: node
   linkType: hard
 
@@ -13449,21 +13459,22 @@ __metadata:
   languageName: node
   linkType: hard
 
-"beachball@npm:3.0.0-alpha.7":
-  version: 3.0.0-alpha.7
-  resolution: "beachball@npm:3.0.0-alpha.7"
+"beachball@npm:3.0.0-alpha.8":
+  version: 3.0.0-alpha.8
+  resolution: "beachball@npm:3.0.0-alpha.8"
   dependencies:
     "@vercel/detect-agent": "npm:^1.2.1"
     commander: "npm:^14.0.3"
     nano-spawn: "npm:^2.1.0"
-    p-graph: "npm:^3.0.0-alpha.4"
+    p-graph: "npm:^3.0.0-alpha.5"
     p-limit: "npm:^3.1.0"
     prompts: "npm:^2.4.2"
     semver: "npm:^7.7.4"
     workspace-tools: "npm:^0.42.0"
   bin:
     beachball: bin/beachball.js
-  checksum: 10c0/5f4bd3f00bf5c99dcd40887fcc099ef808f80f4c939066fed0c2ff12217e65a644f53dac1f3f08babac52e3d82970ce9cbac67890886a5a8fde1d2748f54f41c
+    beachball-auth-helper: bin/beachball-auth-helper.js
+  checksum: 10c0/12e9e716af0f4ed34d7636e759cdbfed738983e3ff92a9566970a49853c4b5517be0a60f33880580d6b024d303a7f96562fb137d156fe5590d46413124258441
   languageName: node
   linkType: hard
 
@@ -25857,10 +25868,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"p-graph@npm:^3.0.0-alpha.4":
-  version: 3.0.0-alpha.4
-  resolution: "p-graph@npm:3.0.0-alpha.4"
-  checksum: 10c0/84452847e6cb761aedcfe1d2d02faff2fd8e9155807e97e7beb90006d2e14e46c2f55c51b3578198a1d28b9c3e576bef9980a063e47b5ff681655d1433c6a03f
+"p-graph@npm:^3.0.0-alpha.5":
+  version: 3.0.0-alpha.5
+  resolution: "p-graph@npm:3.0.0-alpha.5"
+  checksum: 10c0/5c3c85b7a4e79781de4ae663d0f443bbddce2bc7426d63e4262a2441dfce87d627a2ff8bf1df9dbd52fc872b92b9a830db9785d882502f29e263aa557987e02f
   languageName: node
   linkType: hard
 
