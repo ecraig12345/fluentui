@@ -41,11 +41,6 @@ extends:
               os: linux
             workspace:
               clean: all
-            templateContext:
-              outputs:
-                - output: pipelineArtifact
-                  targetPath: $(System.DefaultWorkingDirectory)
-                  artifactName: output
             steps:
               - task: Bash@3
                 name: validation

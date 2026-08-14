@@ -43,11 +43,6 @@ extends:
               os: linux
             workspace:
               clean: all
-            templateContext:
-              outputs:
-                - output: pipelineArtifact
-                  targetPath: $(System.DefaultWorkingDirectory)
-                  artifactName: output
             steps:
               - template: .devops/templates/tools.yml@self
                 parameters:
