@@ -42,35 +42,37 @@ extends:
       name: Azure-Pipelines-1ESPT-ExDShared
       image: windows-latest
       os: windows # We need windows because compliance task only run on windows.
+    settings:
+      networkIsolationPolicy: AzureActiveDirectory,AzureKeyVault,AzureResourceManager,AzureStorage,GitHub
     stages:
-      - stage: main
+      - stage: build
+        displayName: Build artifacts
         jobs:
-          - job: Release
+          - job: build
+            displayName: Build, test, pack
             pool:
               name: Azure-Pipelines-1ESPT-ExDShared
               image: ubuntu-latest
               os: linux
             workspace:
               clean: all
+            variables:
+              - template: .devops/templates/release-build-variables.yml@self
             templateContext:
+              outputParentDirectory: $(Build.StagingDirectory)
               outputs:
                 - output: pipelineArtifact
-                  targetPath: $(System.DefaultWorkingDirectory)
-                  artifactName: output
+                  artifactName: ${{ variables.packagesArtifactName }}
+                  path: $(packagesArtifactPath)
+                - output: pipelineArtifact
+                  artifactName: ${{ variables.releaseToolArtifactName }}
+                  path: $(releaseToolArtifactPath)
             steps:
-              - template: .devops/templates/tools.yml@self
+              - template: .devops/templates/release-setup.yml@self
                 parameters:
                   dryRun: ${{ parameters.dryRun }}
 
-              - script: |
-                  git config user.name "Fluent UI Build"
-                  git config user.email "fluentui-internal@service.microsoft.com"
-                displayName: Configure git user (used by beachball)
-
-              - task: Bash@3
-                inputs:
-                  filePath: yarn-ci.sh
-                displayName: yarn
+              - template: .devops/templates/prepare-release-artifacts.yml@self
 
                 # Deletes all existing changefiles so that only bump that happens is for nightly
               - script: |
@@ -88,7 +90,7 @@ extends:
                 displayName: 'Bump and commit nightly versions'
 
               - script: |
-                  FLUENT_PROD_BUILD=true yarn nx run-many -t build -p "tag:vNext"  --exclude "tag:npm:private,tag:tools,tag:charting"--nxBail
+                  FLUENT_PROD_BUILD=true yarn nx run-many -t build -p "tag:vNext" --exclude "tag:npm:private,tag:tools,tag:charting" --nxBail
                 displayName: build
 
               - script: |
@@ -96,13 +98,17 @@ extends:
                 displayName: lint
 
               - script: |
-                  FLUENT_PROD_BUILD=true yarn nx run-many -t test -p "tag:vNext"  --exclude "tag:npm:private,tag:tools,tag:charting"--nxBail
+                  FLUENT_PROD_BUILD=true yarn nx run-many -t test -p "tag:vNext" --exclude "tag:npm:private,tag:tools,tag:charting" --nxBail
                 displayName: test
 
               - script: |
-                  yarn beachball publish -b origin/$(Build.SourceBranchName) --no-push --tag nightly --config scripts/beachball/src/release-vNext.config.js
-                  git reset --hard origin/$(Build.SourceBranchName)
-                displayName: Publish changes and bump versions
+                  mkdir -p '$(packagesArtifactPath)'
+                  yarn beachball publish -b origin/$(Build.SourceBranchName) --no-push --pack-to-path '$(packagesArtifactPath)' --tag nightly --config scripts/beachball/src/release-vNext.config.js
+                displayName: Pack packages
                 condition: not(${{ parameters.dryRun }})
-                env:
-                  NPM_TOKEN: $(npmToken)
+
+      - template: .devops/templates/release-stage.yml@self
+        parameters:
+          dryRun: ${{ parameters.dryRun }}
+          productName: fluentui-react-components-nightly
+          npmTag: nightly

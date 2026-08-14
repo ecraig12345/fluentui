@@ -32,36 +32,37 @@ extends:
       name: Azure-Pipelines-1ESPT-ExDShared
       image: windows-latest
       os: windows # We need windows because compliance task only run on windows.
+    settings:
+      networkIsolationPolicy: AzureActiveDirectory,AzureKeyVault,AzureResourceManager,AzureStorage,GitHub
     stages:
-      - stage: main
+      - stage: build
+        displayName: Build artifacts
         jobs:
-          - job: Release
+          - job: build
+            displayName: Build, test, pack
             pool:
               name: Azure-Pipelines-1ESPT-ExDShared
               image: ubuntu-latest
               os: linux
             workspace:
               clean: all
+            variables:
+              - template: .devops/templates/release-build-variables.yml@self
             templateContext:
+              outputParentDirectory: $(Build.StagingDirectory)
               outputs:
                 - output: pipelineArtifact
-                  targetPath: $(System.DefaultWorkingDirectory)
-                  artifactName: output
+                  artifactName: ${{ variables.packagesArtifactName }}
+                  path: $(packagesArtifactPath)
+                - output: pipelineArtifact
+                  artifactName: ${{ variables.releaseToolArtifactName }}
+                  path: $(releaseToolArtifactPath)
             steps:
-              - template: .devops/templates/tools.yml@self
+              - template: .devops/templates/release-setup.yml@self
                 parameters:
                   dryRun: ${{ parameters.dryRun }}
 
-              - script: |
-                  git config user.name "Fluent UI Build"
-                  git config user.email "fluentui-internal@service.microsoft.com"
-                  git remote set-url origin https://$(githubUser):$(githubPAT)@github.com/microsoft/fluentui.git
-                displayName: Authenticate git for pushes
-
-              - task: Bash@3
-                inputs:
-                  filePath: yarn-ci.sh
-                displayName: yarn
+              - template: .devops/templates/prepare-release-artifacts.yml@self
 
               - script: |
                   FLUENT_PROD_BUILD=true yarn nx run-many -t build -p tag:vNext --exclude 'tag:tools,tag:type:stories,apps/**' --nxBail
@@ -81,21 +82,25 @@ extends:
                 condition: not(${{ parameters.dryRun }})
 
               - script: |
-                  yarn beachball publish --config scripts/beachball/src/release-vNext.config.js --message 'release: applying package updates - react-components'
-                  git reset --hard origin/master
-                env:
-                  GITHUB_PAT: $(githubPAT)
-                  NPM_TOKEN: $(npmToken)
-                displayName: Publish changes and bump versions
-                condition: not(${{ parameters.dryRun }})
-
-              - script: |
-                  node -r ./scripts/ts-node/src/register scripts/executors/src/tag-react-components.ts --token $(npmToken)
-                displayName: Tag prelease packages with prerelease tag
-                continueOnError: true
+                  mkdir -p '$(packagesArtifactPath)'
+                  yarn beachball publish --no-push --pack-to-path '$(packagesArtifactPath)' --config scripts/beachball/src/release-vNext.config.js --message 'release: applying package updates - react-components'
+                displayName: Pack packages
                 condition: not(${{ parameters.dryRun }})
 
               # Since releases are scoped, this should warn for any packages that were mistakenly not included in scoping
               - script: |
                   yarn syncpack list-mismatches
                 displayName: Check for dependency mismatches
+
+      - template: .devops/templates/release-stage.yml@self
+        parameters:
+          dryRun: ${{ parameters.dryRun }}
+          productName: fluentui-react-components
+
+      - template: .devops/templates/push-stage.yml@self
+        parameters:
+          dryRun: ${{ parameters.dryRun }}
+          buildCommand: FLUENT_PROD_BUILD=true yarn nx run-many -t build -p tag:vNext --exclude 'tag:tools,tag:type:stories,apps/**' --nxBail
+          beachballConfig: scripts/beachball/src/release-vNext.config.js
+          message: 'release: applying package updates - react-components'
+          postPushCommand: node -r ./scripts/ts-node/src/register scripts/executors/src/tag-react-components.ts --token $(npmToken)

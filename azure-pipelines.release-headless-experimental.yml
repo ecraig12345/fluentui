@@ -30,30 +30,37 @@ extends:
       name: Azure-Pipelines-1ESPT-ExDShared
       image: windows-latest
       os: windows # We need windows because compliance task only run on windows.
+    settings:
+      networkIsolationPolicy: AzureActiveDirectory,AzureKeyVault,AzureResourceManager,AzureStorage,GitHub
     stages:
-      - stage: main
+      - stage: build
+        displayName: Build artifacts
         jobs:
-          - job: Release
+          - job: build
+            displayName: Build, test, pack
             pool:
               name: Azure-Pipelines-1ESPT-ExDShared
               image: ubuntu-latest
               os: linux
             workspace:
               clean: all
+            variables:
+              - template: .devops/templates/release-build-variables.yml@self
             templateContext:
+              outputParentDirectory: $(Build.StagingDirectory)
               outputs:
                 - output: pipelineArtifact
-                  targetPath: $(System.DefaultWorkingDirectory)
-                  artifactName: output
+                  artifactName: ${{ variables.packagesArtifactName }}
+                  path: $(packagesArtifactPath)
+                - output: pipelineArtifact
+                  artifactName: ${{ variables.releaseToolArtifactName }}
+                  path: $(releaseToolArtifactPath)
             steps:
-              - template: .devops/templates/tools.yml@self
+              - template: .devops/templates/release-setup.yml@self
                 parameters:
                   dryRun: ${{ parameters.dryRun }}
 
-              - script: |
-                  git config user.name "Fluent UI Build"
-                  git config user.email "fluentui-internal@service.microsoft.com"
-                displayName: Configure git user (used by beachball)
+              - template: .devops/templates/prepare-release-artifacts.yml@self
 
               - task: Bash@3
                 name: validation
@@ -72,11 +79,6 @@ extends:
                     echo "Branch path: $BRANCH_PATH"
                     echo "Feature name: $FEATURE_NAME"
                 displayName: Validate branch and extract feature name
-
-              - script: |
-                  corepack enable
-                  yarn install --immutable
-                displayName: Install dependencies
 
                 # Deletes all existing changefiles so that only the experimental bump happens
               - script: |
@@ -122,9 +124,13 @@ extends:
                 displayName: test
 
               - script: |
-                  yarn beachball publish -b origin/$(validation.branchPath) --no-push --tag experimental --config scripts/beachball/src/release-headless.config.js
-                  git reset --hard origin/$(validation.branchPath)
-                displayName: Publish changes and bump versions
+                  mkdir -p '$(packagesArtifactPath)'
+                  yarn beachball publish -b origin/$(validation.branchPath) --no-push --pack-to-path '$(packagesArtifactPath)' --tag experimental --config scripts/beachball/src/release-headless.config.js
+                displayName: Pack packages
                 condition: and(succeeded(), not(${{ parameters.dryRun }}))
-                env:
-                  NPM_TOKEN: $(npmToken)
+
+      - template: .devops/templates/release-stage.yml@self
+        parameters:
+          dryRun: ${{ parameters.dryRun }}
+          productName: fluentui-react-headless-experimental
+          npmTag: experimental

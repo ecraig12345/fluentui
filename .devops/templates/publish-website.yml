@@ -1,8 +1,3 @@
-parameters:
-  - name: version
-    type: string
-    default: 8
-
 steps:
   - task: AzureCLI@2
     displayName: 'Copy website drop to Azure'
@@ -13,9 +8,9 @@ steps:
       inlineScript: |
         az storage blob upload-batch \
         --destination 'fabric-website' \
-        --source $(System.DefaultWorkingDirectory)/apps/public-docsite/dist \
+        --source $(System.DefaultWorkingDirectory)/fabric-website \
         --account-name fabricweb \
-        --destination-path v${{ parameters.version }}/$(Build.BuildNumber)/ \
+        --destination-path v8/$(Build.BuildNumber)/ \
         --auth-mode login \
         --overwrite
 
@@ -29,8 +24,8 @@ steps:
         az storage blob upload \
         --account-name fabricweb \
         --container-name fabric-website \
-        --name manifests/v${{ parameters.version }}-df.js \
-        --file $(System.DefaultWorkingDirectory)/site-manifests/v${{ parameters.version }}-df.js \
+        --name manifests/v8-df.js \
+        --file $(System.DefaultWorkingDirectory)/site-manifests/v8-df.js \
         --auth-mode login \
         --overwrite
 
@@ -44,7 +39,7 @@ steps:
         az storage blob upload \
         --account-name fabricweb \
         --container-name fabric-website \
-        --name manifests/v${{ parameters.version }}-prod.js \
-        --file $(System.DefaultWorkingDirectory)/site-manifests/v${{ parameters.version }}-prod.js \
+        --name manifests/v8-prod.js \
+        --file $(System.DefaultWorkingDirectory)/site-manifests/v8-prod.js \
         --auth-mode login \
         --overwrite

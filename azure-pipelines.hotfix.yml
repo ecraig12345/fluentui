@@ -31,11 +31,14 @@ extends:
       name: Azure-Pipelines-1ESPT-ExDShared
       image: windows-latest
       os: windows # We need windows because compliance task only run on windows.
+    settings:
+      networkIsolationPolicy: AzureActiveDirectory,AzureKeyVault,AzureResourceManager,AzureStorage,GitHub
     stages:
-      - stage: main
+      - stage: build
+        displayName: Build artifacts
         jobs:
-          - job: Release
-            dependsOn: Compliance
+          - job: build
+            displayName: Build and pack
             pool:
               name: Azure-Pipelines-1ESPT-ExDShared
               image: ubuntu-latest
@@ -43,28 +46,33 @@ extends:
             workspace:
               clean: all
             templateContext:
+              outputParentDirectory: $(Build.StagingDirectory)
               outputs:
                 - output: pipelineArtifact
-                  targetPath: $(System.DefaultWorkingDirectory)
-                  artifactName: output
+                  artifactName: ${{ variables.packagesArtifactName }}
+                  path: $(packagesArtifactPath)
+                - output: pipelineArtifact
+                  artifactName: ${{ variables.releaseToolArtifactName }}
+                  path: $(releaseToolArtifactPath)
+            variables:
+              - template: .devops/templates/release-build-variables.yml@self
             steps:
-              - template: .devops/templates/tools.yml@self
+              - bash: |
+                  if [[ -z "$(targetNpmVersion)" ]]; then
+                    echo "##vso[task.logissue type=error]targetNpmVersion is not specified"
+                    exit 1
+                  fi
+                displayName: Check targetNpmVersion is specified
+
+              - template: .devops/templates/release-setup.yml@self
                 parameters:
                   dryRun: ${{ parameters.dryRun }}
 
-              - script: |
-                  node -e "if('$(targetNpmVersion)' === '') throw new Error('targetNpmVersion is not specified');"
-                displayName: 'Checking for targetNpmVersion variable'
+              - template: .devops/templates/prepare-release-artifacts.yml@self
 
               - script: |
-                  npm install semver
-                  node -e "let semver = require('semver');if(semver.valid('$(targetNpmVersion)') === null){ throw new Error('Invalid version specified'); }"
+                  node -e "let semver = require('semver');if(!semver.valid('$(targetNpmVersion)')){ throw new Error('Invalid version specified'); }"
                 displayName: 'Check targetNpmVersion is valid semver'
-
-              - task: Bash@3
-                inputs:
-                  filePath: yarn-ci.sh
-                displayName: yarn
 
               - script: |
                   npm version $(targetNpmVersion)
@@ -79,11 +87,13 @@ extends:
                 displayName: yarn bundle FUIR
 
               - script: |
-                  npm pack
+                  mkdir -p '$(packagesArtifactPath)/1'
+                  npm pack --pack-destination '$(packagesArtifactPath)/1'
                 displayName: 'Create tarball'
                 workingDirectory: 'packages/react'
 
-              - script: |
-                  npm publish packages/react/react-$(targetNpmVersion).tgz --tag hf8 --//registry.npmjs.org/:_authToken=$(npmToken)
-                displayName: Publish new version
-                condition: not(${{ parameters.dryRun }})
+      - template: .devops/templates/release-stage.yml@self
+        parameters:
+          dryRun: ${{ parameters.dryRun }}
+          productName: fluentui-react-v8-hotfix
+          npmTag: hf8

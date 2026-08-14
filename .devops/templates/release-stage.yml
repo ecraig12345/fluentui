@@ -1,0 +1,92 @@
+parameters:
+  - name: dryRun
+    type: boolean
+  - name: productName
+    type: string
+  - name: npmTag
+    type: string
+    default: latest
+  - name: additionalArtifacts
+    type: object
+    default: []
+  - name: additionalSteps
+    type: stepList
+    default: []
+
+stages:
+  - stage: publish
+    displayName: Publish
+    dependsOn: build
+    condition: and(succeeded(), not(${{ parameters.dryRun }}))
+    jobs:
+      - job: npm_publish
+        displayName: Publish npm packages
+        pool:
+          name: Azure-Pipelines-1ESPT-ExDShared
+          image: ubuntu-latest
+          os: linux
+        variables:
+          packagesArtifactPath: $(Agent.BuildDirectory)/${{ variables.packagesArtifactName }}
+          releaseToolArtifactPath: $(Agent.BuildDirectory)/${{ variables.releaseToolArtifactName }}
+          releaseToolArtifactBin: $(releaseToolArtifactPath)/index.mjs
+        templateContext:
+          type: releaseJob
+          isProduction: true
+          inputs:
+            - input: pipelineArtifact
+              artifactName: ${{ variables.packagesArtifactName }}
+              targetPath: $(packagesArtifactPath)
+            - input: pipelineArtifact
+              artifactName: ${{ variables.releaseToolArtifactName }}
+              targetPath: $(releaseToolArtifactPath)
+            - ${{ each artifact in parameters.additionalArtifacts }}:
+                - input: pipelineArtifact
+                  artifactName: ${{ artifact.artifactName }}
+                  targetPath: ${{ artifact.targetPath }}
+        steps:
+          - task: UseNode@1
+            displayName: Install Node.js 22
+            retryCountOnTaskFailure: 1
+            inputs:
+              version: 22.x
+              checkLatest: true
+
+          - task: AzureCLI@2
+            displayName: Get credentials for staging blob storage
+            inputs:
+              azureSubscription: ogx-esrp-infra-bot
+              scriptType: bash
+              scriptLocation: inlineScript
+              addSpnToEnvironment: true
+              inlineScript: |
+                echo "##vso[task.setvariable variable=STAGING_TENANT_ID]$tenantId"
+                echo "##vso[task.setvariable variable=STAGING_CLIENT_ID]$servicePrincipalId"
+                echo "##vso[task.setvariable variable=STAGING_ID_TOKEN;issecret=true]$idToken"
+
+          - task: AzureKeyVault@2
+            displayName: Get ESRP certificates from Key Vault
+            inputs:
+              azureSubscription: ESRP-JSHost3
+              KeyVaultName: OGX-JSHost-KV
+              SecretsFilter: OGX-JSHost-Auth4,OGX-JSHost-Sign3
+
+          - script: node "$(releaseToolArtifactBin)"
+            displayName: Publish npm packages using ESRP Release API
+            retryCountOnTaskFailure: 3
+            env:
+              PACKED_PACKAGES_PATH: $(packagesArtifactPath)
+              ESRP_PRODUCT_NAME: ${{ parameters.productName }}
+              ESRP_NPM_TAG: ${{ parameters.npmTag }}
+              ESRP_USER: elcraig@microsoft.com
+              ESRP_APPROVERS: dannyvv@microsoft.com
+              ESRP_TENANT_ID: cdc5aeea-15c5-4db6-b079-fcadd2505dc2
+              ESRP_CLIENT_ID: 0a35e01f-eadf-420a-a2bf-def002ba898d
+              ESRP_AUTH_CERT: $(OGX-JSHost-Auth4)
+              ESRP_REQUEST_SIGNING_CERT: $(OGX-JSHost-Sign3)
+              STAGING_STORAGE_ACCOUNT_NAME: ogxesrptempstorage
+              STAGING_CLIENT_ID: $(STAGING_CLIENT_ID)
+              STAGING_TENANT_ID: $(STAGING_TENANT_ID)
+              STAGING_ID_TOKEN: $(STAGING_ID_TOKEN)
+
+          - ${{ each step in parameters.additionalSteps }}:
+              - ${{ step }}

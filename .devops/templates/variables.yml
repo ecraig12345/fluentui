@@ -5,3 +5,6 @@ variables:
   NX_PARALLEL: 8
   NX_PREFER_TS_NODE: true
   NX_VERBOSE_LOGGING: true
+
+  packagesArtifactName: packed-packages
+  releaseToolArtifactName: release-api-tool

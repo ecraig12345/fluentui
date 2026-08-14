@@ -1,0 +1,7 @@
+# Creates the release artifact directories and stages the ESRP release tool.
+steps:
+  - script: |
+      mkdir -p '$(packagesArtifactPath)'
+      mkdir -p '$(releaseToolArtifactPath)'
+      cp node_modules/@microsoft/esrp-npm-release/dist/index.mjs '$(releaseToolArtifactPath)'
+    displayName: Copy release API tool to staging directory

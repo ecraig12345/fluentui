@@ -30,10 +30,14 @@ extends:
       name: Azure-Pipelines-1ESPT-ExDShared
       image: windows-latest
       os: windows # We need windows because compliance task only run on windows.
+    settings:
+      networkIsolationPolicy: AzureActiveDirectory,AzureKeyVault,AzureResourceManager,AzureStorage,GitHub
     stages:
-      - stage: main
+      - stage: build
+        displayName: Build artifacts
         jobs:
-          - job: Release
+          - job: build
+            displayName: Build, test, pack
             pool:
               name: Azure-Pipelines-1ESPT-ExDShared
               image: ubuntu-latest
@@ -41,27 +45,23 @@ extends:
             timeoutInMinutes: 90
             workspace:
               clean: all
+            variables:
+              - template: .devops/templates/release-build-variables.yml@self
             templateContext:
-              outputParentDirectory: $(System.DefaultWorkingDirectory)
+              outputParentDirectory: $(Build.StagingDirectory)
               outputs:
                 - output: pipelineArtifact
-                  targetPath: $(System.DefaultWorkingDirectory)
-                  artifactName: output
+                  artifactName: ${{ variables.packagesArtifactName }}
+                  path: $(packagesArtifactPath)
+                - output: pipelineArtifact
+                  artifactName: ${{ variables.releaseToolArtifactName }}
+                  path: $(releaseToolArtifactPath)
             steps:
-              - template: .devops/templates/tools.yml@self
+              - template: .devops/templates/release-setup.yml@self
                 parameters:
                   dryRun: ${{ parameters.dryRun }}
 
-              - script: |
-                  git config user.name "Fluent UI Build"
-                  git config user.email "fluentui-internal@service.microsoft.com"
-                  git remote set-url origin https://$(githubUser):$(githubPAT)@github.com/microsoft/fluentui.git
-                displayName: Authenticate git for pushes
-
-              - task: Bash@3
-                inputs:
-                  filePath: yarn-ci.sh
-                displayName: yarn
+              - template: .devops/templates/prepare-release-artifacts.yml@self
 
               - script: |
                   echo "Following packages will be published(if they contain changes):"
@@ -80,10 +80,19 @@ extends:
                 displayName: lint
 
               - script: |
-                  yarn beachball publish --config scripts/beachball/src/release-tools.config.js --message 'release: applying package updates - tools'
-                  git reset --hard origin/master
-                env:
-                  GITHUB_PAT: $(githubPAT)
-                  NPM_TOKEN: $(npmToken)
-                displayName: Publish changes and bump versions
+                  mkdir -p '$(packagesArtifactPath)'
+                  yarn beachball publish --no-push --pack-to-path '$(packagesArtifactPath)' --config scripts/beachball/src/release-tools.config.js --message 'release: applying package updates - tools'
+                displayName: Pack packages
                 condition: not(${{ parameters.dryRun }})
+
+      - template: .devops/templates/release-stage.yml@self
+        parameters:
+          dryRun: ${{ parameters.dryRun }}
+          productName: fluentui-tools
+
+      - template: .devops/templates/push-stage.yml@self
+        parameters:
+          dryRun: ${{ parameters.dryRun }}
+          buildCommand: FLUENT_PROD_BUILD=true yarn nx run-many -t build -p 'tag:tools,!tag:npm:private,!tag:v8' --exclude 'apps/**' --nxBail
+          beachballConfig: scripts/beachball/src/release-tools.config.js
+          message: 'release: applying package updates - tools'
