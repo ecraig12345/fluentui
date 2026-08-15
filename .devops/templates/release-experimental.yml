@@ -1,0 +1,134 @@
+parameters:
+  - name: dryRun
+    displayName: Dry run mode
+    type: boolean
+  - name: baseVersionPackage
+    displayName: Package used to determine the base version
+    type: string
+    default: ''
+  - name: beachballConfig
+    displayName: Beachball configuration file
+    type: string
+  - name: label
+    displayName: Release label for change files and commit messages
+    type: string
+  - name: nxScope
+    displayName: Nx project selection arguments
+    type: string
+  - name: releaseType
+    displayName: Release type
+    type: string
+    default: experimental
+    values:
+      - experimental
+      - nightly
+  - name: versionBumpArgs
+    displayName: Version bump generator arguments
+    type: string
+
+stages:
+  - stage: main
+    jobs:
+      - job: Release
+        pool:
+          name: '1ES-Host-Ubuntu'
+          image: '1ES-PT-Ubuntu-20.04'
+          os: linux
+        timeoutInMinutes: 90
+        workspace:
+          clean: all
+        templateContext:
+          outputParentDirectory: $(System.DefaultWorkingDirectory)
+          outputs:
+            - output: pipelineArtifact
+              targetPath: $(System.DefaultWorkingDirectory)
+              artifactName: output
+        steps:
+          - task: Bash@3
+            name: validation
+            inputs:
+              targetType: 'inline'
+              script: |
+                BRANCH="$(Build.SourceBranch)"
+                BRANCH_PATH=${BRANCH#refs/heads/}
+                echo "##vso[task.setvariable variable=branchPath;isOutput=true]$BRANCH_PATH"
+                echo "Branch path: $BRANCH_PATH"
+                if [[ "${{ parameters.releaseType }}" == "experimental" ]]; then
+                  if [[ ! $BRANCH =~ refs/heads/experimental/ ]]; then
+                    echo "##vso[task.logissue type=error]Branch '$BRANCH' must start with 'refs/heads/experimental/'"
+                    exit 1
+                  fi
+                  FEATURE_NAME=${BRANCH#refs/heads/experimental/}
+                  echo "##vso[task.setvariable variable=featureName;isOutput=true]$FEATURE_NAME"
+                  echo "Feature name: $FEATURE_NAME"
+                fi
+            displayName: Validate branch and extract release metadata
+
+          - template: tools.yml
+            parameters:
+              dryRun: ${{ parameters.dryRun }}
+
+          - script: |
+              rm -rf change
+              mkdir change
+
+              version_bump_extra_args=()
+
+              if [[ "${{ parameters.releaseType }}" == "nightly" ]]; then
+                VERSION=$(date -u +nightly-%Y%m%d-%H%M)
+                COMMIT_MESSAGE="bump ${{ parameters.label }} versions"
+                CHANGE_MESSAGE="Release ${{ parameters.label }}"
+                version_bump_extra_args+=(--bumpType nightly --prereleaseTag "$VERSION")
+                echo "Prerelease tag: $VERSION"
+              else
+                DATE=$(date -u +%Y%m%d)
+                HASH=$(git rev-parse --short HEAD)
+                VERSION_SUFFIX="experimental.$(validation.featureName).$DATE-$HASH"
+
+                if [[ -n "${{ parameters.baseVersionPackage }}" ]]; then
+                  BASE_VERSION=$(node -p "require('./${{ parameters.baseVersionPackage }}').version")
+                  VERSION="$BASE_VERSION-$VERSION_SUFFIX"
+                  COMMIT_MESSAGE="bump ${{ parameters.label }} versions to $VERSION"
+                  version_bump_extra_args+=(--explicitVersion "$VERSION")
+                  echo "Target version: $VERSION"
+                else
+                  VERSION="$VERSION_SUFFIX"
+                  COMMIT_MESSAGE="bump ${{ parameters.label }} versions with suffix $VERSION"
+                  version_bump_extra_args+=(--versionSuffix "$VERSION")
+                  echo "Version suffix: $VERSION"
+                fi
+
+                CHANGE_MESSAGE="Release ${{ parameters.label }} $VERSION"
+              fi
+
+              yarn nx g @fluentui/workspace-plugin:version-bump ${{ parameters.versionBumpArgs }} "${version_bump_extra_args[@]}"
+              git add .
+              git commit -m "$COMMIT_MESSAGE"
+
+              yarn change --config "${{ parameters.beachballConfig }}" --type prerelease --message "$CHANGE_MESSAGE" --dependent-change-type prerelease
+            displayName: Bump and commit ${{ parameters.releaseType }} versions
+
+          - script: |
+              echo "Packages in the release scope:"
+              yarn nx show projects ${{ parameters.nxScope }}
+            displayName: Show packages
+
+          - script: |
+              FLUENT_PROD_BUILD=true yarn nx run-many -t build ${{ parameters.nxScope }} --nxBail
+            displayName: build
+
+          - script: |
+              FLUENT_PROD_BUILD=true yarn nx run-many -t lint ${{ parameters.nxScope }} --nxBail
+            displayName: lint
+
+          - script: |
+              FLUENT_PROD_BUILD=true yarn nx run-many -t test ${{ parameters.nxScope }} --nxBail
+            displayName: test
+
+          - script: |
+              yarn beachball publish -b origin/$(validation.branchPath) --no-push --tag ${{ parameters.releaseType }} --config ${{ parameters.beachballConfig }}
+              git reset --hard origin/$(validation.branchPath)
+            displayName: Publish changes and bump versions
+            condition: and(succeeded(), not(${{ parameters.dryRun }}))
+            env:
+              NPM_TOKEN: $(npmToken)
