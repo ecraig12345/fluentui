@@ -34,49 +34,20 @@ extends:
       image: windows-latest
       os: windows # We need windows because compliance task only run on windows.
     stages:
-      - stage: main
-        jobs:
-          - job: Release
-            pool:
-              name: '1ES-Host-Ubuntu'
-              image: '1ES-PT-Ubuntu-20.04'
-              os: linux
-            workspace:
-              clean: all
-            steps:
-              - template: .devops/templates/tools.yml@self
-                parameters:
-                  dryRun: ${{ parameters.dryRun }}
-                  githubPAT: $(githubPAT)
+      - template: .devops/templates/release.yml@self
+        parameters:
+          dryRun: ${{ parameters.dryRun }}
+          beachballConfig: scripts/beachball/src/release-vNext.config.js
+          label: react-components
+          nxScope: -p tag:vNext --exclude 'tag:tools,tag:type:stories,apps/**'
+          postSteps:
+            - script: |
+                node -r ./scripts/ts-node/src/register scripts/executors/src/tag-react-components.ts --token $(npmToken)
+              displayName: Tag prelease packages with prerelease tag
+              continueOnError: true
+              condition: not(${{ parameters.dryRun }})
 
-              - script: |
-                  FLUENT_PROD_BUILD=true yarn nx run-many -t build -p tag:vNext --exclude 'tag:tools,tag:type:stories,apps/**' --nxBail
-                displayName: build
-
-              - script: |
-                  FLUENT_PROD_BUILD=true yarn nx run-many -t test -p tag:vNext --exclude 'tag:tools,tag:type:stories,apps/**' --nxBail
-                displayName: test
-
-              - script: |
-                  FLUENT_PROD_BUILD=true yarn nx run-many -t lint -p tag:vNext --exclude 'tag:tools,tag:type:stories,apps/**' --nxBail
-                displayName: lint
-
-              - script: |
-                  yarn beachball publish --config scripts/beachball/src/release-vNext.config.js --message 'release: applying package updates - react-components'
-                  git reset --hard origin/master
-                env:
-                  GITHUB_PAT: $(githubPAT)
-                  NPM_TOKEN: $(npmToken)
-                displayName: Publish changes and bump versions
-                condition: not(${{ parameters.dryRun }})
-
-              - script: |
-                  node -r ./scripts/ts-node/src/register scripts/executors/src/tag-react-components.ts --token $(npmToken)
-                displayName: Tag prelease packages with prerelease tag
-                continueOnError: true
-                condition: not(${{ parameters.dryRun }})
-
-              # Since releases are scoped, this should warn for any packages that were mistakenly not included in scoping
-              - script: |
-                  yarn syncpack list-mismatches
-                displayName: Check for dependency mismatches
+            # Since releases are scoped, this should warn for any packages that were mistakenly not included in scoping
+            - script: |
+                yarn syncpack list-mismatches
+              displayName: Check for dependency mismatches

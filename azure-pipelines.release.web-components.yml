@@ -44,30 +44,13 @@ extends:
       image: windows-latest
       os: windows # We need windows because compliance task only run on windows.
     stages:
-      - stage: main
-        jobs:
-          - job: Release
-            pool:
-              name: '1ES-Host-Ubuntu'
-              image: '1ES-PT-Ubuntu-20.04'
-              os: linux
-            workspace:
-              clean: all
-            steps:
-              - template: .devops/templates/tools.yml@self
-                parameters:
-                  dryRun: ${{ parameters.dryRun }}
-                  githubPAT: $(githubPAT)
-
-              - script: |
-                  yarn nx run-many -t format:check lint test build -p tag:web-components --exclude vr-tests-web-components --nxBail
-                displayName: Build, Test, Lint
-
-              - script: |
-                  yarn beachball publish --config scripts/beachball/src/release-web-components.config.js --message 'release: applying package updates - web-components'
-                  git reset --hard origin/master
-                env:
-                  GITHUB_PAT: $(githubPAT)
-                  NPM_TOKEN: $(npmToken)
-                displayName: Publish changes and bump versions
-                condition: not(${{ parameters.dryRun }})
+      - template: .devops/templates/release.yml@self
+        parameters:
+          dryRun: ${{ parameters.dryRun }}
+          beachballConfig: scripts/beachball/src/release-web-components.config.js
+          label: web-components
+          nxScope: -p tag:web-components --exclude vr-tests-web-components
+          preSteps:
+            - script: |
+                yarn nx run-many --nxBail -p tag:web-components --exclude vr-tests-web-components -t format:check
+              displayName: format:check

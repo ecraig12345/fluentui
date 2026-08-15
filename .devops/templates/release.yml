@@ -1,0 +1,90 @@
+parameters:
+  - name: dryRun
+    displayName: Dry run mode
+    type: boolean
+  - name: beachballConfig
+    displayName: Beachball configuration file
+    type: string
+  - name: label
+    displayName: Release label for change files and commit messages
+    type: string
+  - name: nxScope
+    displayName: Nx project selection arguments
+    type: string
+  - name: artifactOutputs
+    displayName: Pipeline artifact outputs
+    type: object
+    default:
+      - output: pipelineArtifact
+        targetPath: $(System.DefaultWorkingDirectory)
+        artifactName: output
+  - name: preSteps
+    displayName: Steps to run before the shared release steps
+    type: stepList
+    default: []
+  - name: postSteps
+    displayName: Steps to run after publishing
+    type: stepList
+    default: []
+
+stages:
+  - stage: main
+    jobs:
+      - job: Release
+        pool:
+          name: '1ES-Host-Ubuntu'
+          image: '1ES-PT-Ubuntu-20.04'
+          os: linux
+        timeoutInMinutes: 90
+        workspace:
+          clean: all
+        templateContext:
+          outputParentDirectory: $(System.DefaultWorkingDirectory)
+          outputs:
+            - ${{ each output in parameters.artifactOutputs }}:
+                - ${{ output }}
+        steps:
+          - template: tools.yml
+            parameters:
+              dryRun: ${{ parameters.dryRun }}
+              githubPAT: $(githubPAT)
+
+          - ${{ each step in parameters.preSteps }}:
+              - ${{ step }}
+
+          - script: |
+              echo "Packages in the release scope:"
+              yarn nx show projects ${{ parameters.nxScope }}
+            displayName: Show packages
+
+          - script: |
+              FLUENT_PROD_BUILD=true yarn nx run-many -t build ${{ parameters.nxScope }} --nxBail
+            displayName: build
+
+          - script: |
+              FLUENT_PROD_BUILD=true yarn nx run-many -t test ${{ parameters.nxScope }} --nxBail
+            displayName: test
+
+          - script: |
+              FLUENT_PROD_BUILD=true yarn nx run-many -t lint ${{ parameters.nxScope }} --nxBail
+            displayName: lint
+
+          - script: |
+              FLUENT_PROD_BUILD=true yarn nx run-many -t bundle ${{ parameters.nxScope }} --nxBail
+            displayName: bundle
+
+          - script: |
+              FLUENT_PROD_BUILD=true yarn nx run-many -t verify-packaging ${{ parameters.nxScope }} --nxBail
+            displayName: verify packaged assets
+
+          - script: |
+              yarn beachball publish --config ${{ parameters.beachballConfig }} --message 'release: applying package updates - ${{ parameters.label }}'
+              git reset --hard origin/master
+            env:
+              GITHUB_PAT: $(githubPAT)
+              NPM_TOKEN: $(npmToken)
+            displayName: Publish changes and bump versions
+            condition: and(succeeded(), not(${{ parameters.dryRun }}))
+
+          - ${{ each step in parameters.postSteps }}:
+              - ${{ step }}
