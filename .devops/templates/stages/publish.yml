@@ -1,0 +1,105 @@
+parameters:
+  # Release type
+  - name: releaseType
+    type: string
+    values:
+      - official
+      - experimental
+      - nightly
+  # Release label for change files and commit messages
+  - name: label
+    type: string
+  # npm distribution tag override.
+  # Defaults to 'latest' for official releases and `${{ parameters.releaseType }}` otherwise.
+  - name: npmTag
+    type: string
+    default: ''
+  # Dry run mode (set in the UI)
+  - name: dryRun
+    type: boolean
+
+stages:
+  # Publish the packed packages to npm using the ESRP Release API.
+  - stage: publish
+    displayName: Publish
+    dependsOn: build
+    jobs:
+      - job: npm_publish
+        displayName: Publish npm packages
+        pool:
+          name: Azure-Pipelines-1ESPT-ExDShared
+          image: ubuntu-latest
+          os: linux
+        variables:
+          packagesArtifactPath: $(Agent.BuildDirectory)/${{ variables.packagesArtifactName }}
+          releaseToolArtifactPath: $(Agent.BuildDirectory)/${{ variables.releaseToolArtifactName }}
+          releaseToolArtifactBin: $(releaseToolArtifactPath)/index.mjs
+        templateContext:
+          type: releaseJob
+          isProduction: true
+          inputs:
+            - input: pipelineArtifact
+              artifactName: ${{ variables.packagesArtifactName }}
+              targetPath: $(packagesArtifactPath)
+            - input: pipelineArtifact
+              artifactName: ${{ variables.releaseToolArtifactName }}
+              targetPath: $(releaseToolArtifactPath)
+
+        steps:
+          - script: |
+              ls -R '$(packagesArtifactPath)'
+              ls -R '$(releaseToolArtifactPath)'
+            displayName: Show artifact contents
+
+          - task: UseNode@1
+            displayName: Install Node.js 22
+            retryCountOnTaskFailure: 1
+            inputs:
+              version: 22.x
+              checkLatest: false
+
+          - task: AzureCLI@2
+            displayName: Get credentials for staging blob storage
+            inputs:
+              azureSubscription: $(esrpStagingAzureSubscription)
+              scriptType: bash
+              scriptLocation: inlineScript
+              addSpnToEnvironment: true
+              inlineScript: |
+                echo "##vso[task.setvariable variable=STAGING_TENANT_ID]$tenantId"
+                echo "##vso[task.setvariable variable=STAGING_CLIENT_ID]$servicePrincipalId"
+                echo "##vso[task.setvariable variable=STAGING_ID_TOKEN;issecret=true]$idToken"
+
+          - task: AzureKeyVault@2
+            displayName: Get ESRP certificates from Key Vault
+            inputs:
+              azureSubscription: $(esrpReleaseAzureSubscription)
+              KeyVaultName: $(esrpReleaseKeyVaultName)
+              SecretsFilter: OGX-JSHost-Auth4,OGX-JSHost-Sign3
+
+          # Release packages using the ESRP API. If this stage fails or times out, it's safe to
+          # manually re-run the stage unless the result in the logs is failDoNotRetry.
+          # https://github.com/microsoft/beachball/blob/main/packages/esrp-npm-release/README.md
+          - script: node '$(releaseToolArtifactBin)'
+            displayName: Publish npm packages using ESRP Release API
+            # For a dry run, skip only the publish step (still verify that getting creds worked).
+            condition: and(succeeded(), not(${{ parameters.dryRun }}))
+            env:
+              PACKED_PACKAGES_PATH: $(packagesArtifactPath)
+              ESRP_PRODUCT_NAME: 'fluentui - ${{ parameters.label }}'
+              ${{ if ne(parameters.npmTag, '') }}:
+                ESRP_NPM_TAG: ${{ parameters.npmTag }}
+              ${{ elseif eq(parameters.releaseType, 'official') }}:
+                ESRP_NPM_TAG: latest
+              ${{ else }}:
+                ESRP_NPM_TAG: ${{ parameters.releaseType }}
+              ESRP_USER: $(esrpReleaseUser)
+              ESRP_APPROVERS: $(esrpReleaseApprovers)
+              ESRP_TENANT_ID: $(esrpReleaseTenantId)
+              ESRP_CLIENT_ID: $(esrpReleaseClientId)
+              ESRP_AUTH_CERT: $(OGX-JSHost-Auth4)
+              ESRP_REQUEST_SIGNING_CERT: $(OGX-JSHost-Sign3)
+              STAGING_STORAGE_ACCOUNT_NAME: $(esrpStagingStorageAccount)
+              STAGING_CLIENT_ID: $(STAGING_CLIENT_ID)
+              STAGING_TENANT_ID: $(STAGING_TENANT_ID)
+              STAGING_ID_TOKEN: $(STAGING_ID_TOKEN)

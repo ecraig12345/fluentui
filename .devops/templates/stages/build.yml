@@ -1,0 +1,177 @@
+parameters:
+  # Release type
+  - name: releaseType
+    type: string
+    values:
+      - official
+      - experimental
+      - nightly
+  # Beachball configuration file
+  - name: beachballConfig
+    type: string
+  # Release label for change files and commit messages
+  - name: label
+    type: string
+  # Nx project selection arguments to build/test/lint/bundle
+  - name: nxScope
+    type: string
+  # Required for experimental/nightly: this script should invoke @fluentui/workspace-plugin:version-bump
+  # with arguments to bump the appropriate packages to the desired version.
+  # For releaseType: 'experimental', the variable `experimentalFeatureName` will be available.
+  - name: bumpUnofficialVersionsScript
+    type: string
+    # This is not run for official releases, and is required for experimental/nightly.
+    default: 'echo "##vso[task.logissue type=error]bumpUnofficialVersionsScript must be specified for unofficial releases" && exit 1'
+  # Extra output artifacts for the build job.
+  # The directories must be under outputParentDirectory (see below) for compliance scanning.
+  - name: extraOutputs
+    type: object
+    default: []
+  # Extra steps to run in the build job before packages are actually built.
+  - name: preBuildSteps
+    type: stepList
+    default: []
+  # Extra steps to run in the build job after packages are packed.
+  - name: postPackSteps
+    type: stepList
+    default: []
+  # Dry run mode (set in the UI)
+  - name: dryRun
+    type: boolean
+
+stages:
+  # Build and test, then generate packed packages and other artifacts to release.
+  - stage: build
+    jobs:
+      - job: Build and pack
+        pool:
+          name: Azure-Pipelines-1ESPT-ExDShared
+          image: ubuntu-latest
+          os: linux
+        timeoutInMinutes: 90
+        workspace:
+          clean: all
+        variables:
+          packagesArtifactPath: $(Build.StagingDirectory)/${{ variables.packagesArtifactName }}
+          releaseToolArtifactPath: $(Build.StagingDirectory)/${{ variables.releaseToolArtifactName }}
+          branchPath: $[replace(variables['Build.SourceBranch'], 'refs/heads/', '')]
+        templateContext:
+          # Setting this ensures that compliance scans are only run once per pipeline, not per artifact.
+          outputParentDirectory: $(Build.StagingDirectory)
+          outputs:
+            - output: pipelineArtifact
+              artifactName: ${{ variables.packagesArtifactName }}
+              path: $(packagesArtifactPath)
+            - output: pipelineArtifact
+              artifactName: ${{ variables.releaseToolArtifactName }}
+              path: $(releaseToolArtifactPath)
+            - ${{ each output in parameters.extraOutputs }}:
+                - ${{ output }}
+        steps:
+          - ${{ if eq(parameters.releaseType, 'experimental') }}:
+              # For experimental, validate that the branch name starts with "experimental/"
+              # and extract the feature name.
+              - script: |
+                  if [[ ! $BRANCH =~ refs/heads/experimental/ ]]; then
+                    echo "##vso[task.logissue type=error]Branch '$BRANCH' must start with 'refs/heads/experimental/'"
+                    exit 1
+                  fi
+                  FEATURE_NAME=${BRANCH#refs/heads/experimental/}
+                  echo "##vso[task.setvariable variable=experimentalFeatureName]$FEATURE_NAME"
+                  echo "Feature name: $FEATURE_NAME"
+                displayName: Validate experimental branch
+                env:
+                  BRANCH: $(Build.SourceBranch)
+                settableVariables:
+                  - experimentalFeatureName
+
+          # Install tools, authenticate with npm, and install dependencies.
+          - template: /.devops/templates/steps/tools.yml@self
+            parameters:
+              dryRun: ${{ parameters.dryRun }}
+
+          # Update versions and change files for an experimental or nightly release.
+          - ${{ if ne(parameters.releaseType, 'official') }}:
+              # Deletes all existing change files so that only bump that happens is for experimental/nightly.
+              - script: |
+                  rm -f change/*
+                displayName: 'Delete existing change files'
+
+              - script: ${{ parameters.bumpUnofficialVersionsScript }}
+                displayName: 'Bump ${{ parameters.releaseType }} versions'
+
+              # Create temporary change files and make a temporary commit.
+              # The messages aren't very important since the changelog and commit won't be pushed.
+              - script: |
+                  git add .
+                  yarn change \
+                    --config "$BEACHBALL_CONFIG" \
+                    --type prerelease \
+                    --message "Release ${{ parameters.label }}" \
+                    --dependent-change-type prerelease
+
+                  git commit -m "bump ${{ parameters.label }} versions"
+                displayName: 'Create and commit prerelease change files'
+                env:
+                  BEACHBALL_CONFIG: ${{ parameters.beachballConfig }}
+
+          - script: |
+              echo "Packages in the release scope:"
+              yarn nx show projects ${{ parameters.nxScope }}
+            displayName: Show packages
+
+          - ${{ each step in parameters.preBuildSteps }}:
+              - ${{ step }}
+
+          - script: |
+              FLUENT_PROD_BUILD=true yarn nx run-many -t build ${{ parameters.nxScope }} --nxBail
+            displayName: build
+
+          - script: |
+              FLUENT_PROD_BUILD=true yarn nx run-many -t test ${{ parameters.nxScope }} --nxBail
+            displayName: test
+
+          - script: |
+              FLUENT_PROD_BUILD=true yarn nx run-many -t lint ${{ parameters.nxScope }} --nxBail
+            displayName: lint
+
+          - script: |
+              FLUENT_PROD_BUILD=true yarn nx run-many -t bundle ${{ parameters.nxScope }} --nxBail
+            displayName: bundle
+
+          # Create packagesArtifactPath so it exists for the output even if nothing was packed.
+          # Also copy the release API tool for use in the publish job (which can't download sources).
+          - script: |
+              mkdir -p '$(packagesArtifactPath)'
+              mkdir -p '$(releaseToolArtifactPath)'
+              cp node_modules/@microsoft/esrp-npm-release/dist/index.mjs '$(releaseToolArtifactPath)'
+            displayName: Prepare artifact paths
+
+          # Official release
+          - ${{ if eq(parameters.releaseType, 'official') }}:
+              - script: |
+                  FLUENT_PROD_BUILD=true yarn nx run-many -t verify-packaging ${{ parameters.nxScope }} --nxBail
+                displayName: verify packaged assets
+
+              # Pack packages only (don't push changes to GitHub or publish to npm)
+              - script: |
+                  yarn beachball publish \
+                    --no-push \
+                    --pack-to-path '$(packagesArtifactPath)' \
+                    --config ${{ parameters.beachballConfig }}
+                displayName: Pack packages (official)
+                condition: and(succeeded(), not(${{ parameters.dryRun }}))
+
+          # Nightly or experimental release
+          - ${{ else }}:
+              - script: |
+                  yarn beachball publish \
+                    --no-push \
+                    --pack-to-path '$(packagesArtifactPath)' \
+                    --config ${{ parameters.beachballConfig }} \
+                    -b 'origin/$(branchPath)'
+                displayName: Pack packages (${{ parameters.releaseType }})
+                condition: and(succeeded(), not(${{ parameters.dryRun }}))
+
+          - ${{ each step in parameters.postPackSteps }}:
+              - ${{ step }}

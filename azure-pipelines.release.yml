@@ -24,67 +24,89 @@ resources:
       ref: refs/tags/release
 
 extends:
-  template: /.devops/templates/release.yml@self
+  template: v1/Office.Official.PipelineTemplate.yml@OfficePipelineTemplates
   parameters:
-    dryRun: ${{ parameters.dryRun }}
-    releaseType: official
-    beachballConfig: scripts/beachball/src/release-v8.config.js
-    label: react v8
-    nxScope: -p tag:v8 --exclude tag:vNext,tag:tools,ssr-tests,vr-tests,perf-test
-    extraOutputs:
-      - output: pipelineArtifact
-        targetPath: $(Build.StagingDirectory)/homepage
-        artifactName: homepage.htm
-        displayName: homepage.htm
-      - output: pipelineArtifact
-        targetPath: $(Build.StagingDirectory)/site-manifests
-        artifactName: site-manifests
-        displayName: site-manifests
-      - output: pipelineArtifact
-        targetPath: $(Build.StagingDirectory)/fabric-website
-        artifactName: fabric-website
-        displayName: fabric-website
+    pool:
+      name: Azure-Pipelines-1ESPT-ExDShared
+      image: windows-latest
+      os: windows # We need Windows because compliance tasks only run on Windows.
+    settings:
+      networkIsolationPolicy: AzureActiveDirectory,AzureKeyVault,AzureStorage,GitHub
+    stages:
+      - template: /.devops/templates/stages/build.yml@self
+        parameters:
+          dryRun: ${{ parameters.dryRun }}
+          releaseType: official
+          beachballConfig: scripts/beachball/src/release-v8.config.js
+          label: react v8
+          nxScope: -p tag:v8 --exclude tag:vNext,tag:tools,ssr-tests,vr-tests,perf-test
+          extraOutputs:
+            - output: pipelineArtifact
+              targetPath: $(Build.StagingDirectory)/homepage
+              artifactName: homepage.htm
+              displayName: homepage.htm
+            - output: pipelineArtifact
+              targetPath: $(Build.StagingDirectory)/site-manifests
+              artifactName: site-manifests
+              displayName: site-manifests
+            - output: pipelineArtifact
+              targetPath: $(Build.StagingDirectory)/fabric-website
+              artifactName: fabric-website
+              displayName: fabric-website
 
-    preBuildSteps:
-      - script: |
-          yarn generate-version-files
-        displayName: Generate version files
+          preBuildSteps:
+            - script: |
+                yarn generate-version-files
+              displayName: Generate version files
 
-    postPackSteps:
-      # create-site-manifests is a script defined in @fluentui/public-docsite-setup.
-      # It generates manifest files used to load the current version on developer.microsoft.com/fluentui.
-      - script: |
-          yarn create-site-manifests ./packages/react
-        displayName: 'Generate website manifests'
+          postPackSteps:
+            # create-site-manifests is a script defined in @fluentui/public-docsite-setup.
+            # It generates manifest files used to load the current version on developer.microsoft.com/fluentui.
+            - script: |
+                yarn create-site-manifests ./packages/react
+              displayName: 'Generate website manifests'
 
-      # Generate the homepage.htm file used to load developer.microsoft.com/fluentui. Note that the
-      # generated file must be manually checked in to an internal repo, it's just generated as a build
-      # artifact for convenience and tracking.
-      - script: |
-          node ./packages/public-docsite-setup/scripts/generateHomepage '$(Build.StagingDirectory)/homepage'
-        displayName: 'Generate homepage.htm'
+            # Generate the homepage.htm file used to load developer.microsoft.com/fluentui. Note that the
+            # generated file must be manually checked in to an internal repo, it's just generated as a build
+            # artifact for convenience and tracking.
+            - script: |
+                node ./packages/public-docsite-setup/scripts/generateHomepage '$(Build.StagingDirectory)/homepage'
+              displayName: 'Generate homepage.htm'
 
-      - script: |
-          cp -R '$(System.DefaultWorkingDirectory)/apps/public-docsite/dist' '$(Build.StagingDirectory)/fabric-website'
-          cp -R '$(System.DefaultWorkingDirectory)/site-manifests' '$(Build.StagingDirectory)/site-manifests'
-        displayName: 'Copy website artifacts to staging directory'
+            - script: |
+                cp -R '$(System.DefaultWorkingDirectory)/apps/public-docsite/dist' '$(Build.StagingDirectory)/fabric-website'
+                cp -R '$(System.DefaultWorkingDirectory)/site-manifests' '$(Build.StagingDirectory)/site-manifests'
+              displayName: 'Copy website artifacts to staging directory'
 
-    # Since v8 updates should be very rare, it's probably not necessary to update the website.
-    # If an update is needed, the Azure service connection will need to be re-created, and the following
-    # parameters would be added to the publish stage template:
-    # postPublishSteps:
-    #   - ${{ if eq(parameters.dryRun, false) }}:
-    #       - template: /.devops/templates/steps/publish-website.yml@self
-    # extraPublishInputs:
-    #   - artifactName: fabric-website
-    #     targetPath: $(Agent.BuildDirectory)/fabric-website
-    #   - artifactName: site-manifests
-    #     targetPath: $(Agent.BuildDirectory)/site-manifests
+      - template: /.devops/templates/stages/publish.yml@self
+        parameters:
+          dryRun: ${{ parameters.dryRun }}
+          releaseType: official
+          label: react v8
 
-    postPushSteps:
-      - script: |
-          node -r ./scripts/ts-node/src/register ./scripts/update-release-notes/src/index.ts --apply --debug
-        condition: not(${{ parameters.dryRun }})
-        displayName: 'Update github release notes'
-        env:
-          TOKEN: $(createToken.GITHUB_APP_TOKEN)
+          # Since v8 updates should be very rare, it's probably not necessary to update the website.
+          # If an update is needed, the Azure service connection will need to be re-created, and the following
+          # parameters would be added to the publish stage template:
+          # postPublishSteps:
+          #   - ${{ if eq(parameters.dryRun, false) }}:
+          #       - template: /.devops/templates/steps/publish-website.yml@self
+          # extraPublishInputs:
+          #   - artifactName: fabric-website
+          #     targetPath: $(Agent.BuildDirectory)/fabric-website
+          #   - artifactName: site-manifests
+          #     targetPath: $(Agent.BuildDirectory)/site-manifests
+
+      - template: /.devops/templates/stages/push.yml@self
+        parameters:
+          dryRun: ${{ parameters.dryRun }}
+          releaseType: official
+          beachballConfig: scripts/beachball/src/release-v8.config.js
+          label: react v8
+          nxScope: -p tag:v8 --exclude tag:vNext,tag:tools,ssr-tests,vr-tests,perf-test
+          postPushSteps:
+            - script: |
+                node -r ./scripts/ts-node/src/register ./scripts/update-release-notes/src/index.ts --apply --debug
+              condition: not(${{ parameters.dryRun }})
+              displayName: 'Update github release notes'
+              env:
+                TOKEN: $(createToken.GITHUB_APP_TOKEN)

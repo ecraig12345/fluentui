@@ -1,0 +1,82 @@
+parameters:
+  # Release type
+  - name: releaseType
+    type: string
+    values:
+      - official
+      - experimental
+      - nightly
+  # Beachball configuration file
+  - name: beachballConfig
+    type: string
+  # Release label for change files and commit messages
+  - name: label
+    type: string
+  # Nx project selection arguments to build/test/lint/bundle
+  - name: nxScope
+    type: string
+  # Extra steps to run in the push job after pushing package updates.
+  # The github token is available as $(createToken.GITHUB_APP_TOKEN).
+  - name: postPushSteps
+    type: stepList
+    default: []
+  # Dry run mode (set in the UI)
+  - name: dryRun
+    type: boolean
+
+stages:
+  # Only for official releases: push package updates back to GitHub after publishing to npm.
+  - stage: push
+    displayName: Push to git
+    dependsOn: publish
+    condition: and(succeeded(), eq(parameters.releaseType, 'official'))
+    jobs:
+      - job: push
+        pool:
+          name: Azure-Pipelines-1ESPT-ExDShared
+          image: ubuntu-latest
+          os: linux
+        steps:
+          - template: /.devops/templates/steps/tools.yml@self
+            parameters:
+              dryRun: ${{ parameters.dryRun }}
+
+          - script: |
+              FLUENT_PROD_BUILD=true yarn nx run-many -t build ${{ parameters.nxScope }} --nxBail
+            displayName: Build
+
+          - task: AzureCLI@2
+            name: createToken
+            displayName: Create GitHub App token
+            inputs:
+              azureSubscription: $(ghaTokenAzureSubscription)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                yarn beachball-auth-helper create-github-app-token \
+                  --app-client-id '$(ghaClientId)' \
+                  --key-id '$(ghaTokenKeyId)' \
+                  --repository '$(Build.Repository.Name)' \
+                  --permissions contents:write \
+                  --ci-output-name GITHUB_APP_TOKEN
+
+          # Bump again and push the version updates, changelogs, change file deletions, and tags.
+          - script: |
+              yarn beachball publish \
+                --no-publish \
+                --no-fetch \
+                --config '${{ parameters.beachballConfig }}' \
+                --message 'release: applying package updates - ${{ parameters.label }}'
+            displayName: Push package updates
+            env:
+              BEACHBALL_GIT_TOKEN: $(createToken.GITHUB_APP_TOKEN)
+
+          # These steps should be able to use the token.
+          - ${{ each step in parameters.postPushSteps }}:
+              - ${{ step }}
+
+          - script: yarn beachball-auth-helper revoke-github-app-token
+            displayName: Revoke GitHub App token
+            condition: and(always(), ne(variables['createToken.GITHUB_APP_TOKEN'], ''))
+            env:
+              TOKEN: $(createToken.GITHUB_APP_TOKEN)
