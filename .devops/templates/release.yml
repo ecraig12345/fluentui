@@ -28,7 +28,7 @@ parameters:
   - name: bumpUnofficialVersionsScript
     type: string
     # This is not run for official releases, and is required for experimental/nightly.
-    default: 'echo "##vso[task.logissue type=error]bumpUnofficialVersionsScript must be specified for ${{ parameters.releaseType }} releases" && exit 1'
+    default: 'echo "##vso[task.logissue type=error]bumpUnofficialVersionsScript must be specified for unofficial releases" && exit 1'
   # Extra output artifacts for the build job.
   # The directories must be under outputParentDirectory (see below) for compliance scanning.
   - name: extraOutputs
