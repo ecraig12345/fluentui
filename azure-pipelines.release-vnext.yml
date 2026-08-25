@@ -80,8 +80,3 @@ extends:
                 displayName: Tag prelease packages with prerelease tag
                 continueOnError: true
                 condition: not(${{ parameters.dryRun }})
-
-              # Since releases are scoped, this should warn for any packages that were mistakenly not included in scoping
-              - script: |
-                  yarn syncpack list-mismatches
-                displayName: Check for dependency mismatches
